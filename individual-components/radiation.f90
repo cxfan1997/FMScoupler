@@ -26,7 +26,7 @@ use solar_constant, only: SolarConstant
 use solar_spectrum, only: SolarSpectrum
 use time_interp_external2_mod, only: time_interp_external_init
 use time_manager_mod, only: get_date, julian, print_time, set_calendar_type, time_manager_init, &
-                            time_type
+                            time_type, operator(+), operator(-)
 use tracer_manager_mod, only: get_number_tracers, get_tracer_index, &
                               tracer_manager_end, tracer_manager_init
 use utilities, only: catch_error, integrate
@@ -40,7 +40,6 @@ integer, dimension(4) :: axes
 integer :: block_
 type(CloudDiagnostics) :: cloud_diags
 integer, dimension(6) :: date
-real :: dt
 type(FluxDiagnostics), dimension(4) :: flux_diags
 integer :: i
 integer :: id_lat
@@ -62,8 +61,7 @@ integer :: num_layers
 integer :: num_levels
 integer :: num_lon
 type(RadiationContext) :: radiation_context
-type(time_type) :: time
-type(time_type) :: time_next
+type(time_type) :: time, time_step, time_start, time_end
 integer :: shortwave_axis_id
 real, dimension(:,:), allocatable :: shortwave_band_limits
 type(SolarSpectrum) :: solar_flux_spectrum
@@ -136,12 +134,15 @@ if (trim(atm(1)%calendar) .eq. "julian") then
 else
   call error_mesg("main", "only julian calendar supported.", fatal)
 endif
-time = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
+time_start = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
+time_end = get_cal_time(atm(1)%time(atm(1)%num_times), atm(1)%time_units, atm(1)%calendar)
 if (atm(1)%num_times .gt. 1) then
-  dt = atm(1)%time(2) - atm(1)%time(1)
+  time = get_cal_time(atm(1)%time(2), atm(1)%time_units, atm(1)%calendar)
+  time_step = time - time_start
 else
-  dt = 24.*3000.
+  time_step = time_start
 endif
+time_start = time_start - time_step
 
 !Read in the solar data.
 call solar_flux_constant%create("solar_flux", trim(solar_constant_path))
@@ -159,10 +160,16 @@ num_layers = atm(1)%num_layers
 num_levels = num_layers + 1
 
 !Initialize diag_manager.
-call get_date(time, date(1), date(2), date(3), date(4), date(5), date(6))
+call get_date(time_start, date(1), date(2), date(3), date(4), date(5), date(6))
+call print_time(time_start, "Starting simulation at: ")
 call diag_manager_init(time_init=date)
 
+!Set diag manager end time
+call print_time(time_end, "Ending simulation at: ")
+call diag_manager_set_time_end(time_end)
+
 !Initialize the radiation object.
+time = time_start
 call radiation_context%create(num_columns, num_layers, num_blocks, solar_flux_spectrum%grid, &
                               solar_flux_spectrum%flux, atm(1)%longitude_bounds, atm(1)%latitude_bounds, &
                               max_diam_drop, min_diam_ice, min_diam_drop, n_min, dcs, qcvar, qmin)
@@ -222,8 +229,6 @@ deallocate(shortwave_band_limits)
 !Main loop.
 do t = 1, atm(1)%num_times
   !Calculate the current time.
-  time = get_cal_time(atm(1)%time(t), atm(1)%time_units, atm(1)%calendar)
-  time_next = get_cal_time(atm(1)%time(t) + dt, atm(1)%time_units, atm(1)%calendar)
   call print_time(time, "Running timestep: ")
 
   !Read in the atmospheric properies.
@@ -243,11 +248,12 @@ do t = 1, atm(1)%num_times
   enddo
 
   !Write out diagnostics.
-  call diag_manager_set_time_end(time)
-  call diag_send_complete(time)
+  !call diag_manager_set_time_end(time)
+  call print_time(time, "Finished timestep: ")
+  call diag_send_complete(time_step)
 
   if (t .lt. atm(1)%num_times) then
-    time = time_next
+    time = time + time_step
   endif
 enddo
 
