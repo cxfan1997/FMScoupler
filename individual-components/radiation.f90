@@ -26,7 +26,7 @@ use solar_constant, only: SolarConstant
 use solar_spectrum, only: SolarSpectrum
 use time_interp_external2_mod, only: time_interp_external_init
 use time_manager_mod, only: get_date, julian, print_time, set_calendar_type, time_manager_init, &
-                            time_type, operator(+), operator(-)
+                            time_type, operator(+), operator(-), month_name
 use tracer_manager_mod, only: get_number_tracers, get_tracer_index, &
                               tracer_manager_end, tracer_manager_init
 use utilities, only: catch_error, integrate
@@ -69,6 +69,8 @@ type(SolarConstant) :: solar_flux_constant
 real :: surface_albedo_weight !Weighting needed to combine "nir" and "vis" albedo values in
                               !in the band that contains the infrared cut-off.
 integer :: t
+integer :: time_stamp_unit
+character(len=9) :: month
 
 !MPP timers.
 integer :: aerosol_optics_clock
@@ -143,6 +145,24 @@ else
   time_step = time_start
 endif
 time_start = time_start - time_step
+
+!Write time stamps (for start time and end time) ------
+if ( mpp_pe().EQ.mpp_root_pe() ) then
+  open(newunit=time_stamp_unit, file='time_stamp.out', &
+       status='replace', form='formatted')
+
+  call get_date(time_start, date(1), date(2), date(3), date(4), date(5), date(6))
+  month = month_name(date(2))
+  write (time_stamp_unit,20) date, month(1:3)
+
+  call get_date (time_end, date(1), date(2), date(3), date(4), date(5), date(6))
+  month = month_name(date(2))
+  write (time_stamp_unit,20) date, month(1:3)
+
+  close(time_stamp_unit)
+endif
+
+20  format (i6,5i4,2x,a3)
 
 !Read in the solar data.
 call solar_flux_constant%create("solar_flux", trim(solar_constant_path))
