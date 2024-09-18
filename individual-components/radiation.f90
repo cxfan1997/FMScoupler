@@ -273,9 +273,7 @@ do t = 1, atm(1)%num_times
   call print_time(time, "Finished timestep: ")
   call diag_send_complete(time_step)
 
-  if (t .lt. atm(1)%num_times) then
-    time = time + time_step
-  endif
+  time = time + time_step
 enddo
 
 !Clean up.
