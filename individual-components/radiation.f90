@@ -61,7 +61,7 @@ integer :: num_layers
 integer :: num_levels
 integer :: num_lon
 type(RadiationContext) :: radiation_context
-type(time_type) :: time, time_step, time_start, time_end
+type(time_type) :: time, time_step, time_start, time_end, time_data
 integer :: shortwave_axis_id
 real, dimension(:,:), allocatable :: shortwave_band_limits
 type(SolarSpectrum) :: solar_flux_spectrum
@@ -130,23 +130,29 @@ endif
 !Allocate space for the input data and create the column blocking.
 call create_atmosphere(atm, column_blocking, nxblocks, nyblocks)
 
-!Set the model time.
+!Set the calendar type.
 if (trim(atm(1)%calendar) .eq. "julian") then
   call set_calendar_type(julian)
 else
   call error_mesg("main", "only julian calendar supported.", fatal)
 endif
+
+! The start time is the first time in the data set and the end time is the last time in the data set.
 time_start = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
 time_end = get_cal_time(atm(1)%time(atm(1)%num_times), atm(1)%time_units, atm(1)%calendar)
+
+!Calculate the time step.
 if (atm(1)%num_times .gt. 1) then
   time = get_cal_time(atm(1)%time(2), atm(1)%time_units, atm(1)%calendar)
   time_step = time - time_start
 else
   time_step = time_start
 endif
+
+!The time in the dataset is the end of the time step, so subtract the time step to get the real start time.
 time_start = time_start - time_step
 
-!Write time stamps (for start time and end time) ------
+!Write time stamps (for start time and end time) so that it can be used by FRE.
 if ( mpp_pe().EQ.mpp_root_pe() ) then
   open(newunit=time_stamp_unit, file='time_stamp.out', &
        status='replace', form='formatted')
@@ -250,6 +256,13 @@ deallocate(shortwave_band_limits)
 do t = 1, atm(1)%num_times
   !Calculate the current time.
   call print_time(time, "Running timestep: ")
+
+  !Raise an error if the time step is not consistent.
+  time_data = get_cal_time(atm(1)%time(t), atm(1)%time_units, atm(1)%calendar)
+  if (time_data + time_step .ne. time) then
+    call print_time(time_data, "Time in data: ")
+    call error_mesg("main", "time step is not consistent with data", fatal)
+  endif
 
   !Read in the atmospheric properies.
   call read_time_slice(atm, t, column_blocking)
