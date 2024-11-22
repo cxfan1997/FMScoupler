@@ -97,11 +97,16 @@ integer :: nxblocks = 1
 integer :: nyblocks = 1
 character(len=256) :: solar_constant_path = ""
 character(len=256) :: solar_spectrum_path = ""
+character(len=256) :: profile_path = ""
+character(len=256) :: profile_name = ""
+integer :: profile_date(6) = 0
 namelist /standalone_radiation_nml/ near_infrared_cutoff, &
                                     nxblocks, &
                                     nyblocks, &
                                     solar_constant_path, &
-                                    solar_spectrum_path
+                                    solar_spectrum_path, &
+                                    profile_path, profile_name, &
+                                    profile_date
 
 !Start up mpi.
 call fms_init()
@@ -127,8 +132,28 @@ if (mpp_pe() .eq. mpp_root_pe()) then
   write(logfile_handle, nml=standalone_radiation_nml)
 endif
 
+!Read the coupler resource file if it exists.
+if (file_exists('INPUT/coupler.res')) then
+  open(newunit=time_stamp_unit, file='INPUT/coupler.res', &
+       status='old', form='formatted')
+  read(time_stamp_unit, "(6i5)") profile_date
+endif
+
+!Derive the full profile path
+if (trim(profile_path) .ne. "") then
+  profile_path = trim(profile_path) // "/"
+  write(profile_path, "(a,3i2.2,3a)") profile_path, &
+    profile_date(1), profile_date(2), profile_date(3), &
+    '.', profile_name, ".nc"
+endif
+
+!Check if the profile file exists.
+if (.not. file_exists(trim(profile_path))) then
+  call error_mesg("main", "profile file does not exist", fatal)
+endif
+
 !Allocate space for the input data and create the column blocking.
-call create_atmosphere(atm, column_blocking, nxblocks, nyblocks)
+call create_atmosphere(atm, column_blocking, nxblocks, nyblocks, profile_path)
 
 !Set the calendar type.
 if (trim(atm(1)%calendar) .eq. "julian") then
@@ -288,6 +313,16 @@ do t = 1, atm(1)%num_times
 
   time = time + time_step
 enddo
+
+!Save current state for next profile processing
+call get_date (time, date(1), date(2), date(3),  &
+               date(4), date(5), date(6))
+if ( mpp_pe().EQ.mpp_root_pe()) then
+  open(newunit=time_stamp_unit, file='RESTART/coupler.res', &
+       status='replace', form='formatted')
+  write(time_stamp_unit, '(6i5)') date
+  close(time_stamp_unit)
+endif
 
 !Clean up.
 if (allocated(aerosol_species_diags)) then

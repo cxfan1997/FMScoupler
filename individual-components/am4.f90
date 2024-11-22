@@ -128,7 +128,7 @@ character(len=64), dimension(20) :: override_variables = &
    "none", "none", "none", "none", "none", "none", "none", "none", "none", "none"]
 integer :: override_z_lower = -1
 integer :: override_z_upper = -1
-namelist /am4_nml/ atmos_path, cleansky, clearsky, io_layout, layout, &
+namelist /am4_nml/ cleansky, clearsky, io_layout, layout, &
                    override_path, override_variables, override_z_lower, &
                    override_z_upper
 
@@ -144,12 +144,13 @@ contains
 
 
 !> @brief Reserve memory and read in atmospheric data.
-subroutine create_atmosphere(atm, column_blocking, nxblocks, nyblocks)
+subroutine create_atmosphere(atm, column_blocking, nxblocks, nyblocks, atmos_path_in)
 
   type(Atmosphere_t), dimension(:), allocatable, intent(inout) :: atm
   type(block_control_type), intent(inout) :: column_blocking
   integer, intent(in) :: nxblocks
   integer, intent(in) :: nyblocks
+  character(len=256), intent(in) :: atmos_path_in
 
   character(len=256) :: attr
   type(FmsNetcdfDomainFile_t) :: dataset
@@ -161,6 +162,9 @@ subroutine create_atmosphere(atm, column_blocking, nxblocks, nyblocks)
 
   read(input_nml_file, am4_nml, iostat=ierr)
   err = check_nml_error(ierr, "am4_nml")
+
+  !Set the atmosphere path.
+  atmos_path = trim(atmos_path_in)
 
   !Sanity checks.
   if (trim(override_path) .ne. "none") then
