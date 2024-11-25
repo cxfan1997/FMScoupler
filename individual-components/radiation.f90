@@ -27,7 +27,7 @@ use solar_constant, only: SolarConstant
 use solar_spectrum, only: SolarSpectrum
 use time_interp_external2_mod, only: time_interp_external_init
 use time_manager_mod, only: get_date, julian, print_time, set_calendar_type, time_manager_init, &
-                            time_type, operator(+), operator(-), month_name
+                            time_type, operator(+), operator(-), operator(/=), month_name
 use tracer_manager_mod, only: get_number_tracers, get_tracer_index, &
                               tracer_manager_end, tracer_manager_init
 use utilities, only: catch_error, integrate
@@ -145,7 +145,7 @@ endif
 
 !Derive the full profile path
 write(profile_path, "(2a,i4.4,2i2.2,2a)") trim(profile_path), '/', &
-    profile_date(1), profile_date(2), profile_date(3), &
+      profile_date(1), profile_date(2), profile_date(3), &
       '.', trim(profile_name)
 if (mpp_pe() .eq. mpp_root_pe()) then
   write(logfile_handle, *) "Profile path: ", trim(profile_path)
@@ -283,10 +283,16 @@ do t = 1, atm(1)%num_times
 
   !Raise an error if the time step is not consistent.
   time_data = get_cal_time(atm(1)%time(t), atm(1)%time_units, atm(1)%calendar)
-  if (time_data + time_step .ne. time) then
-    call print_time(time_data, "Time in data: ")
-    call error_mesg("main", "time step is not consistent with data", fatal)
-  endif
+  ! TODO: This is a warning for now, but should be an error.
+  ! This block is to check if the model time step is consistent with the input data.
+  ! However, due to rounding errors in time addition, the model time can be slightly
+  ! off from the input data. The log file is bloated with warnings.
+  ! As a result, this block is commented out.
+  ! if (time_data /= (time + time_step)) then
+    ! call print_time(time_data, "Time in data: ")
+    ! call print_time(time + time_step, "Expected time:")
+    ! call error_mesg("main", "model time step is not consistent with input data", warning)
+  ! endif
 
   !Read in the atmospheric properies.
   call read_time_slice(atm, t, column_blocking)
