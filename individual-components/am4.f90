@@ -184,8 +184,7 @@ subroutine create_atmosphere(atm, column_blocking, nxblocks, nyblocks, atmos_pat
   endif
 
   !Open the *.tile1.nc file and get the longitude and latitude sizes.
-  i = len_trim(atmos_path)
-  if (.not. open_file(tilefile, atmos_path(:i - 3)//".tile1.nc", "read")) then
+  if (.not. open_file(tilefile, trim(atmos_path)//".tile1.nc", "read")) then
     call error_mesg("create_atmosphere", &
                     "cannot find the "//trim(atmos_path)//" tile files.", fatal)
   endif
@@ -206,7 +205,7 @@ subroutine create_atmosphere(atm, column_blocking, nxblocks, nyblocks, atmos_pat
   call lon_and_lat_bounds(atm(1))
 
   !Open dataset.
-  if (.not. open_file(dataset, atmos_path, "read", atm(1)%domain)) then
+  if (.not. open_file(dataset, trim(atmos_path)//".nc", "read", atm(1)%domain)) then
     call error_mesg("create_atmosphere", "cannot open file "//trim(atmos_path)//".", &
                     fatal)
   endif
@@ -300,8 +299,8 @@ subroutine read_time_slice(atm, time_level, column_blocking)
   type(domain2d), pointer :: io_domain
 
   !Open dataset.
-  if (.not. open_file(dataset, atmos_path, "read", atm(1)%domain)) then
-    call error_mesg("create_atmosphere", "cannot open file "//trim(atmos_path)//".", &
+  if (.not. open_file(dataset, trim(atmos_path)//".nc", "read", atm(1)%domain)) then
+    call error_mesg("create_atmosphere", "cannot open file "//trim(atmos_path)//".nc.", &
                     fatal)
   endif
 

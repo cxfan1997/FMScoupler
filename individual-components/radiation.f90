@@ -10,7 +10,8 @@ use diag_manager_mod, only: diag_axis_init, diag_manager_end, diag_manager_init,
 use field_manager_mod, only: model_atmos
 use flux_diagnostics, only: FluxDiagnostics
 use fms_mod, only: check_nml_error, clock_loop, error_mesg, fatal, fms_end, fms_init, input_nml_file, &
-                   mpp_clock_begin, mpp_clock_end, mpp_clock_id, mpp_pe, mpp_root_pe, stdlog
+                   mpp_clock_begin, mpp_clock_end, mpp_clock_id, mpp_pe, mpp_root_pe, stdlog, warning
+use fms2_io_mod,      only: file_exists
 use get_cal_time_mod, only: get_cal_time
 use gfdl_fluxes, only: BroadbandFluxes
 use grid2_mod, only: grid_end, grid_init
@@ -140,16 +141,11 @@ if (file_exists('INPUT/coupler.res')) then
 endif
 
 !Derive the full profile path
-if (trim(profile_path) .ne. "") then
-  profile_path = trim(profile_path) // "/"
-  write(profile_path, "(a,3i2.2,3a)") profile_path, &
+write(profile_path, "(2a,i4.4,2i2.2,2a)") trim(profile_path), '/', &
     profile_date(1), profile_date(2), profile_date(3), &
-    '.', profile_name, ".nc"
-endif
-
-!Check if the profile file exists.
-if (.not. file_exists(trim(profile_path))) then
-  call error_mesg("main", "profile file does not exist", fatal)
+      '.', trim(profile_name)
+if (mpp_pe() .eq. mpp_root_pe()) then
+  write(logfile_handle, *) "Profile path: ", trim(profile_path)
 endif
 
 !Allocate space for the input data and create the column blocking.
