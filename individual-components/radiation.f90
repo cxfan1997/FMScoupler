@@ -138,6 +138,9 @@ if (file_exists('INPUT/coupler.res')) then
   open(newunit=time_stamp_unit, file='INPUT/coupler.res', &
        status='old', form='formatted')
   read(time_stamp_unit, "(6i5)") profile_date
+  if (mpp_pe() .eq. mpp_root_pe()) then
+    write(logfile_handle, *) "Start date from coupler.res", profile_date
+  endif
 endif
 
 !Derive the full profile path
