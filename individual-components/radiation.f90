@@ -103,13 +103,15 @@ type(block_control_type) :: column_blocking
 integer :: near_infrared_cutoff = 14600 !Wavenumber [cm-1] that distinguishes the visible from the near-infrared.
 integer :: nxblocks = 1
 integer :: nyblocks = 1
+logical :: remove_last_timestep = .false.
 character(len=256) :: solar_constant_path = ""
 character(len=256) :: solar_spectrum_path = ""
 namelist /standalone_radiation_nml/ near_infrared_cutoff, &
                                     nxblocks, &
                                     nyblocks, &
                                     solar_constant_path, &
-                                    solar_spectrum_path
+                                    solar_spectrum_path, &
+                                    remove_last_timestep
 
 !Start up mpi.
 call fms_init()
@@ -144,28 +146,12 @@ if (trim(atm(1)%calendar) .eq. "julian") then
 else
   call error_mesg("main", "only julian calendar supported.", fatal)
 endif
+time = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
 if (atm(1)%num_times .gt. 1) then
   dt = atm(1)%time(2) - atm(1)%time(1)
-  do t = 3, atm(1)%num_times
-    !Check to see if the input dataset has a constant timestep.
-    if (abs((atm(1)%time(t) - atm(1)%time(t - 1)) - dt) .gt. 1.e-10) then
-      call error_mesg("main", "timestep is not constant in the input datasets.", fatal)
-    endif
-  enddo
 else
-  !If the input dataset only has one time level, we can't determine the
-  !model radiatoin timestep that was used, so set it to zero.
   dt = 0.
 endif
-
-!Model diagnostics are output at the end of a timestep, yet calculated
-!using the time at the beginning of a timestep.  To mimic that, subtract
-!one timestep off of the first time found in the input dataset.
-time = get_cal_time(max(atm(1)%time(1) - dt, 0.), atm(1)%time_units, atm(1)%calendar)
-timestep = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
-timestep = timestep - time
-write(*, *) atm(1)%time, dt
-
 
 !Read in the solar data.
 call solar_flux_constant%create("solar_flux", trim(solar_constant_path))
@@ -268,7 +254,6 @@ do i = 1, size(radiation_context%aerosol_optics%family)
   call aerosol_species_diags(i)%create(time, axes, radiation_context%aerosol_optics%family(i)%name, &
                                        radiation_context%aerosol_optics%family(i)%name)
 enddo
-call diag_manager_set_time_end(get_cal_time(atm(1)%time(atm(1)%num_times), atm(1)%time_units, atm(1)%calendar))
 
 !Calculate variables need for dealing with the land spectral decomposition.
 num_bands = size(shortwave_band_limits, 2)
@@ -301,9 +286,17 @@ endif
 deallocate(shortwave_band_limits)
 
 !Main loop.
-do t = 1, atm(1)%num_times
+!The last timestep of offline input files might be invalid
+!Remove the last timestep if needed.
+if (remove_last_timstep) then
+        invalid_timestep = 1   
+else
+        invalid_timestep = 0
+endif
+do t = 1, atm(1)%num_times-invalid_timestep
   !Calculate the current time.
-  time_next = time + timestep
+  time = get_cal_time(atm(1)%time(t), atm(1)%time_units, atm(1)%calendar)
+  time_next = get_cal_time(atm(1)%time(t) + dt, atm(1)%time_units, atm(1)%calendar)
   call print_time(time, "Running timestep: ")
 
   !Read in the atmospheric properies.
@@ -324,7 +317,8 @@ do t = 1, atm(1)%num_times
   enddo
 
   !Write out diagnostics.
-  call diag_send_complete(timestep)
+  call diag_manager_set_time_end(time)
+  call diag_send_complete(time)
   time = time_next
 enddo
 
