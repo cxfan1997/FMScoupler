@@ -79,7 +79,7 @@ type(time_type) :: time
 type(time_type) :: time_next
 type(time_type) :: timestep
 real :: top_level_pressure
-
+integer :: invalid_timestep
 !MPP timers.
 integer :: aerosol_optics_clock
 integer :: cloud_optics_clock
@@ -288,7 +288,7 @@ deallocate(shortwave_band_limits)
 !Main loop.
 !The last timestep of offline input files might be invalid
 !Remove the last timestep if needed.
-if (remove_last_timstep) then
+if (remove_last_timestep) then
         invalid_timestep = 1   
 else
         invalid_timestep = 0
