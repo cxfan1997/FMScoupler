@@ -27,7 +27,8 @@ use solar_constant, only: SolarConstant
 use solar_spectrum, only: SolarSpectrum
 use time_interp_external2_mod, only: time_interp_external_init
 use time_manager_mod, only: get_date, julian, print_time, set_calendar_type, time_manager_init, &
-                            time_type, operator(+), operator(-), operator(/=), month_name
+                            time_type, operator(+), operator(-), operator(/=), operator(/), &
+                            month_name, get_time, set_time
 use tracer_manager_mod, only: get_number_tracers, get_tracer_index, &
                               tracer_manager_end, tracer_manager_init
 use utilities, only: catch_error, integrate
@@ -62,7 +63,7 @@ integer :: num_layers
 integer :: num_levels
 integer :: num_lon
 type(RadiationContext) :: radiation_context
-type(time_type) :: time, time_step, time_start, time_end, time_data
+type(time_type) :: time, time2, time_step, time_start, time_end, time_data
 integer :: shortwave_axis_id
 real, dimension(:,:), allocatable :: shortwave_band_limits
 type(SolarSpectrum) :: solar_flux_spectrum
@@ -100,6 +101,7 @@ character(len=256) :: solar_constant_path = ""
 character(len=256) :: solar_spectrum_path = ""
 character(len=256) :: profile_path = ""
 character(len=256) :: profile_name = ""
+character(len=256) :: profile_time_type = "end"
 integer :: profile_date(6) = 0
 namelist /standalone_radiation_nml/ near_infrared_cutoff, &
                                     nxblocks, &
@@ -107,7 +109,7 @@ namelist /standalone_radiation_nml/ near_infrared_cutoff, &
                                     solar_constant_path, &
                                     solar_spectrum_path, &
                                     profile_path, profile_name, &
-                                    profile_date
+                                    profile_date, profile_time_type
 
 !Start up mpi.
 call fms_init()
@@ -163,11 +165,14 @@ endif
 
 ! The start time is the first time in the data set and the end time is the last time in the data set.
 time_start = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
+time_start = normalize_time(time_start)
 time_end = get_cal_time(atm(1)%time(atm(1)%num_times), atm(1)%time_units, atm(1)%calendar)
+time_end = normalize_time(time_end)
 
 !Calculate the time step.
 if (atm(1)%num_times .gt. 1) then
   time = get_cal_time(atm(1)%time(2), atm(1)%time_units, atm(1)%calendar)
+  time = normalize_time(time)
   time_step = time - time_start
 else
   time_step = time_start
@@ -175,6 +180,17 @@ endif
 
 !The time in the dataset is the end of the time step, so subtract the time step to get the real start time.
 time_start = time_start - time_step
+!Adjust the start time based on the time type in the input dataset.
+!If the time in the file is the end of a time step, then the start time is the end time minus the time step.
+!If the time in the file is the mid-point of a time step, then the start time is the end time minus half the time step.
+!If the time in the file is the start of a time step, do nothing.
+if (profile_time_type .eq. "end") then
+  time_start = time_start - time_step
+elseif (profile_time_type .eq. "mid") then
+  time_start = time_start - time_step / 2
+elseif (profile_time_type .ne. "start") then
+  call error_mesg("main", "invalid time type", fatal)
+endif
 
 !Write time stamps (for start time and end time) so that it can be used by FRE.
 if ( mpp_pe().EQ.mpp_root_pe() ) then
@@ -283,16 +299,25 @@ do t = 1, atm(1)%num_times
 
   !Raise an error if the time step is not consistent.
   time_data = get_cal_time(atm(1)%time(t), atm(1)%time_units, atm(1)%calendar)
+  time_data = normalize_time(time_data)
   ! TODO: This is a warning for now, but should be an error.
   ! This block is to check if the model time step is consistent with the input data.
   ! However, due to rounding errors in time addition, the model time can be slightly
   ! off from the input data. The log file is bloated with warnings.
   ! As a result, this block is commented out.
-  ! if (time_data /= (time + time_step)) then
-    ! call print_time(time_data, "Time in data: ")
-    ! call print_time(time + time_step, "Expected time:")
-    ! call error_mesg("main", "model time step is not consistent with input data", warning)
-  ! endif
+  if (mpp_pe().EQ.mpp_root_pe()) then
+    if (profile_time_type .eq. "end") then
+      time2 = time_data - time_step
+    elseif (profile_time_type .eq. "mid") then
+      time2 = time_data - time_step / 2
+    else
+      time2 = time_data
+    endif
+    if (time2 /= time) then
+      call print_time(time2, "Time from input dataset: ")
+      call error_mesg("main", "model time step is not consistent with input data", warning)
+    endif
+  endif
 
   !Read in the atmospheric properies.
   call read_time_slice(atm, t, column_blocking)
@@ -349,6 +374,25 @@ call fms_end()
 
 contains
 
+function normalize_time(time)
+  type(time_type), intent(in) :: time
+  type(time_type) :: normalize_time
+  integer :: seconds, days, ticks, residual
+  integer, parameter :: time_step = 1800
+
+  call get_time(time, seconds, days, ticks)
+  residual = mod(seconds, time_step)
+  if (residual .ge. time_step / 2) then
+    seconds = seconds + time_step - residual
+    if (seconds .ge. 86400) then
+      seconds = 0
+      days = days + 1
+    endif
+  else
+    seconds = seconds - residual
+  endif
+  normalize_time = set_time(seconds, days, ticks)
+end function normalize_time
 
 subroutine radiation_scheme(radiation_context, atm, column_blocking, num_layers, block_, &
                             aerosol_optics_clock, cloud_optics_clock, flux_solver_clock, &
