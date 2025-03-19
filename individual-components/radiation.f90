@@ -10,7 +10,7 @@ use diag_manager_mod, only: diag_axis_init, diag_manager_end, diag_manager_init,
 use field_manager_mod, only: model_atmos
 use flux_diagnostics, only: FluxDiagnostics
 use fms_mod, only: check_nml_error, clock_loop, error_mesg, fatal, fms_end, fms_init, input_nml_file, &
-                   mpp_clock_begin, mpp_clock_end, mpp_clock_id, mpp_pe, mpp_root_pe, stdlog, warning
+                   mpp_clock_begin, mpp_clock_end, mpp_clock_id, mpp_pe, mpp_root_pe, stdlog, stdout, warning
 use fms2_io_mod,      only: file_exists
 use get_cal_time_mod, only: get_cal_time
 use gfdl_fluxes, only: BroadbandFluxes
@@ -52,7 +52,7 @@ integer :: ios
 integer :: j
 integer :: k
 integer :: last_infrared_band !Index of the last "nir" band.
-integer :: logfile_handle
+integer :: logfile_handle, stdout_handle
 integer :: longwave_axis_id
 real, dimension(:, :), allocatable :: longwave_band_limits
 integer :: num_bands
@@ -131,6 +131,7 @@ gas_optics_clock = mpp_clock_id("    Radiation: gas optical properties")
 read(input_nml_file, nml=standalone_radiation_nml, iostat=ios)
 ios = check_nml_error(ios, "standalone_radiation_nml")
 logfile_handle = stdlog()
+stdout_handle = stdout()
 if (mpp_pe() .eq. mpp_root_pe()) then
   write(logfile_handle, nml=standalone_radiation_nml)
 endif
@@ -141,7 +142,7 @@ if (file_exists('INPUT/coupler.res')) then
        status='old', form='formatted')
   read(time_stamp_unit, "(6i5)") profile_date
   if (mpp_pe() .eq. mpp_root_pe()) then
-    write(logfile_handle, *) "Start date from coupler.res", profile_date
+    write(stdout_handle, "(a,1x,i4.4,2i2.2,1x,3i2.2)") "Start date from coupler.res", profile_date
   endif
 endif
 
@@ -150,7 +151,7 @@ write(profile_path, "(2a,i4.4,2i2.2,2a)") trim(profile_path), '/', &
       profile_date(1), profile_date(2), profile_date(3), &
       '.', trim(profile_name)
 if (mpp_pe() .eq. mpp_root_pe()) then
-  write(logfile_handle, *) "Profile path: ", trim(profile_path)
+  write(stdout_handle, *) "Profile path: ", trim(profile_path)
 endif
 
 !Allocate space for the input data and create the column blocking.
@@ -177,9 +178,8 @@ if (atm(1)%num_times .gt. 1) then
 else
   time_step = time_start
 endif
+if (mpp_pe() .eq. mpp_root_pe()) call print_time(time_step, "Calculated time step: ")
 
-!The time in the dataset is the end of the time step, so subtract the time step to get the real start time.
-time_start = time_start - time_step
 !Adjust the start time based on the time type in the input dataset.
 !If the time in the file is the end of a time step, then the start time is the end time minus the time step.
 !If the time in the file is the mid-point of a time step, then the start time is the end time minus half the time step.
@@ -227,11 +227,11 @@ num_levels = num_layers + 1
 
 !Initialize diag_manager.
 call get_date(time_start, date(1), date(2), date(3), date(4), date(5), date(6))
-call print_time(time_start, "Starting simulation at: ")
+if (mpp_pe() .eq. mpp_root_pe()) call print_time(time_start, "Starting simulation at: ")
 call diag_manager_init(time_init=date)
 
 !Set diag manager end time
-call print_time(time_end, "Ending simulation at: ")
+if (mpp_pe() .eq. mpp_root_pe()) call print_time(time_end, "Ending simulation at: ")
 call diag_manager_set_time_end(time_end)
 
 !Initialize the radiation object.
@@ -295,7 +295,7 @@ deallocate(shortwave_band_limits)
 !Main loop.
 do t = 1, atm(1)%num_times
   !Calculate the current time.
-  call print_time(time, "Running timestep: ")
+  if (mpp_pe() .eq. mpp_root_pe()) call print_time(time, "Running timestep: ")
 
   !Raise an error if the time step is not consistent.
   time_data = get_cal_time(atm(1)%time(t), atm(1)%time_units, atm(1)%calendar)
@@ -338,7 +338,7 @@ do t = 1, atm(1)%num_times
 
   !Write out diagnostics.
   !call diag_manager_set_time_end(time)
-  call print_time(time, "Finished timestep: ")
+  if (mpp_pe() .eq. mpp_root_pe()) call print_time(time, "Finished timestep: ")
   call diag_send_complete(time_step)
 
   time = time + time_step
