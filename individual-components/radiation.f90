@@ -46,6 +46,7 @@ integer :: block_
 type(CloudDiagnostics) :: cloud_diags
 integer, dimension(6) :: date
 type(FluxDiagnostics), dimension(4) :: flux_diags
+real :: dt
 integer :: i
 integer :: id_area
 integer :: id_lat
@@ -79,6 +80,7 @@ real(kind=wp), dimension(:, :), allocatable :: swabs_integral
 integer :: t
 integer :: time_stamp_unit
 character(len=9) :: month
+real :: top_level_pressure
 
 !Time variables.
 type(time_type) :: time, time2    !Temporary time variables.
@@ -177,6 +179,14 @@ else
   call error_mesg("main", "only julian calendar supported.", fatal)
 endif
 
+! Check if the input data has a constant timestep.
+dt = atm(1)%time(2) - atm(1)%time(1)
+do t = 3, atm(1)%num_times
+  if (abs((atm(1)%time(t) - atm(1)%time(t - 1)) - dt) .gt. 1.e-10) then
+    call error_mesg("main", "timestep is not constant in the input datasets.", fatal)
+  endif
+enddo
+
 ! The start time is the first time in the data set and the end time is the last time in the data set.
 time_start = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
 time_start = normalize_time(time_start)
@@ -188,16 +198,11 @@ if (atm(1)%num_times .gt. 1) then
   time = get_cal_time(atm(1)%time(2), atm(1)%time_units, atm(1)%calendar)
   time = normalize_time(time)
   time_step = time - time_start
-  do t = 3, atm(1)%num_times
-    !Check to see if the input dataset has a constant timestep.
-    if (abs((atm(1)%time(t) - atm(1)%time(t - 1)) - time_step) .gt. 1.e-10) then
-      call error_mesg("main", "timestep is not constant in the input datasets.", fatal)
-    endif
-  enddo
 else
   !If the input dataset only has one time level, we can't determine the
-  !model radiatoin timestep that was used, so set it to zero.
-  time_step = time_start
+  !model radiatoin timestep that was used, so set it to 60 seconds.
+  !This should not affect the radiation calculations and output time stamp.
+  time_step = set_time(0, 60, 0)
 endif
 
 if (mpp_pe() .eq. mpp_root_pe()) call print_time(time_step, "Calculated time step: ")
@@ -231,15 +236,6 @@ if ( mpp_pe().EQ.mpp_root_pe() ) then
 endif
 
 20  format (i6,5i4,2x,a3)
-
-!Model diagnostics are output at the end of a timestep, yet calculated
-!using the time at the beginning of a timestep.  To mimic that, subtract
-!one timestep off of the first time found in the input dataset.
-time = get_cal_time(max(atm(1)%time(1) - dt, 0.), atm(1)%time_units, atm(1)%calendar)
-timestep = get_cal_time(atm(1)%time(1), atm(1)%time_units, atm(1)%calendar)
-timestep = timestep - time
-write(*, *) atm(1)%time, dt
-
 
 !Read in the solar data.
 call solar_flux_constant%create("solar_flux", trim(solar_constant_path))
