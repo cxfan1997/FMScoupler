@@ -25,6 +25,7 @@ use random_numbers_mod, only: randomnumberstream
 use random_number_streams_mod, only: random_number_streams_init, &
                                      random_number_streams_end, &
                                      get_random_number_streams
+use sat_vapor_pres_mod, only: compute_qs, sat_vapor_pres_init
 use solar_constant, only: SolarConstant
 use solar_spectrum, only: SolarSpectrum
 use time_interp_external2_mod, only: time_interp_external_init
@@ -133,6 +134,7 @@ call time_manager_init()
 call tracer_manager_init()
 call grid_init()
 call time_interp_external_init()
+call sat_vapor_pres_init()
 call random_number_streams_init()
 
 !Set up timers.
@@ -517,7 +519,8 @@ subroutine radiation_scheme(radiation_context, atm, column_blocking, num_layers,
   real(kind=wp), dimension(:, :), intent(inout) :: swabs_integral
 
   integer :: band, column, i, n, num_bands, num_columns, num_lat, num_levels, num_lon, s
-  real, dimension(:, :, :), allocatable :: aerosol_relative_humidity
+  real, dimension(:, :, :), allocatable :: relative_humidity
+  real, dimension(:, :, :), allocatable :: saturation
   real, dimension(:), allocatable :: average_cloud
   real, dimension(:), allocatable :: average_high_cloud
   real, dimension(:), allocatable :: average_low_cloud
@@ -581,7 +584,7 @@ subroutine radiation_scheme(radiation_context, atm, column_blocking, num_layers,
   call radiation_context%shortwave_gas_optics%gpoint_limits(shortwave_gpoint_limits)
 
   !Allocate thread-specific arrays.
-  allocate(aerosol_relative_humidity(num_lon, num_lat, num_layers))
+  allocate(relative_humidity(num_lon, num_lat, num_layers))
   allocate(average_cloud(num_columns))
   allocate(average_high_cloud(num_columns))
   allocate(average_low_cloud(num_columns))
@@ -601,7 +604,7 @@ subroutine radiation_scheme(radiation_context, atm, column_blocking, num_layers,
   streams_pointer(1:num_columns) => streams(1:num_lon, 1:num_lat)
 
   !Copy aerosol relative_humidity for now.
-  aerosol_relative_humidity(:, :, :) = atm%ppmv(:, :, :, h2o)
+  ! relative_humidity(:, :, :) = atm%ppmv(:, :, :, h2o)
 
   do i = 1, size(longwave_broadband_fluxes)
     call longwave_broadband_fluxes(i)%create(num_columns, num_levels, .false.)
@@ -676,9 +679,22 @@ subroutine radiation_scheme(radiation_context, atm, column_blocking, num_layers,
                              column_blocking%ibs(block_) - column_blocking%isc + 1, &
                              column_blocking%jbs(block_) - column_blocking%jsc + 1, time_next)
 
+  !Calculate the relative humidity.
+  allocate(saturation(num_lon, num_lat, num_layers))
+  call compute_qs(atm%layer_temperature, &
+                  atm%layer_pressure, &
+                  saturation(:, :, :), &
+                  q=atm%ppmv(:, :, :, h2o))
+  do i = 1, num_layers
+    relative_humidity(:, :, i) = real(atm%ppmv(:, :, i, h2o) / &
+                                      saturation(:, :, i), kind=wp)
+    relative_humidity(:, :, i) = min(relative_humidity(:, :, i), 1._wp)
+  enddo
+  deallocate(saturation)
+
   !Calculate aerosol optics.
   call mpp_clock_begin(aerosol_optics_clock)
-  call radiation_context%calculate_aerosol_optics(atm%aerosols, aerosol_relative_humidity, &
+  call radiation_context%calculate_aerosol_optics(atm%aerosols, relative_humidity, &
                                                   atm%level_pressure, layer_thickness, time, &
                                                   column_blocking%ibs(block_) - column_blocking%isc + 1, &
                                                   column_blocking%ibe(block_) - column_blocking%isc + 1, &
@@ -849,7 +865,7 @@ subroutine radiation_scheme(radiation_context, atm, column_blocking, num_layers,
   deallocate(snow_size)
   deallocate(stratiform_ice_size)
   deallocate(stratiform_liquid_size)
-  deallocate(aerosol_relative_humidity)
+  deallocate(relative_humidity)
   deallocate(flux_ratio)
   deallocate(surface_emissivity)
   do i = 1, size(longwave_broadband_fluxes)
