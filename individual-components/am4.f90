@@ -19,6 +19,7 @@ type, public :: Atmosphere_t
   character(len=128) :: calendar !< Calendar type for the time axis.
   real(kind=wp), dimension(:,:), allocatable :: daylight_fraction !< Daylight correction factor (lon, lat).
   type(domain2d) :: domain !< 2d domain.
+  real(kind=wp), dimension(:,:), allocatable :: area !< Area of each grid cell [m2] (lon, lat).
   real(kind=wp) :: earth_sun_distance_fraction !< Earth sun distance fraction.
   real(kind=wp), dimension(:,:), allocatable :: land_fraction !< Land fraction (lon, lat).
   real(kind=wp), dimension(:), allocatable :: latitude !< Y dimension data (lat).
@@ -63,6 +64,7 @@ end type Atmosphere_t
 
 
 public :: create_atmosphere
+public :: read_area_variable
 public :: read_time_slice
 public :: destroy_atmosphere
 integer, parameter, public :: h2o = 1
@@ -280,8 +282,43 @@ subroutine create_atmosphere(atm, column_blocking, nxblocks, nyblocks, atmos_pat
     allocate(atm(i)%stratiform_snow(nx, ny, atm(1)%num_layers))
     allocate(atm(i)%stratiform_snow_size(nx, ny, atm(1)%num_layers))
     allocate(atm(i)%aerosols(nx, ny, atm(1)%num_layers, 16))
+    allocate(atm(i)%area(nx, ny))
   enddo
 end subroutine create_atmosphere
+
+subroutine read_area_variable(atm, column_blocking)
+
+  type(Atmosphere_t), dimension(:), intent(inout) :: atm
+  type(block_control_type), intent(inout) :: column_blocking
+
+  type(FmsNetcdfDomainFile_t) :: dataset
+  integer :: i, num_blocks, nx, ny
+  real(kind=wp), dimension(:, :), allocatable :: buffer2d
+  type(domain2d), pointer :: io_domain
+
+  !Open dataset.
+  if (.not. open_file(dataset, trim(atmos_path)//".nc", "read", atm(1)%domain)) then
+    call error_mesg("create_atmosphere", "cannot open file "//trim(atmos_path)//".nc.", &
+                    fatal)
+  endif
+
+  !Identify longitude and latitude dimensions.
+  call register_axis(dataset, "grid_xt", "x")
+  call register_axis(dataset, "grid_yt", "y")
+
+  !Allocate buffers.
+  io_domain => mpp_get_io_domain(atm(1)%domain)
+  call mpp_get_compute_domain(io_domain, xsize=nx, ysize=ny)
+  allocate(buffer2d(nx, ny))
+  num_blocks = size(column_blocking%ibs, 1)
+
+  !Read in the variable
+  call read_data(dataset, "area", buffer2d)
+  do i = 1, num_blocks
+    call block_data_2d(buffer2d, atm(i)%area, column_blocking, i)
+  enddo
+
+end subroutine read_area_variable
 
 
 subroutine read_time_slice(atm, time_level, column_blocking)

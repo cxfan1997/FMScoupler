@@ -1,12 +1,12 @@
 program main
 use aerosol_diagnostics, only: AerosolDiagnostics
 use am4, only: Atmosphere_t, create_atmosphere, destroy_atmosphere, h2o, o3, &
-               read_time_slice
+               read_area_variable, read_time_slice
 use atmos_cmip_diag_mod, only: atmos_cmip_diag_end, atmos_cmip_diag_init
 use block_control_mod, only: block_control_type
 use cloud_diagnostics, only: CloudDiagnostics
 use constants_mod, only: pi
-use diag_manager_mod, only: diag_axis_init, diag_manager_end, diag_manager_init, &
+use diag_manager_mod, only: diag_axis_init, diag_manager_end, diag_manager_init, send_data, &
                             diag_manager_set_time_end, diag_send_complete, register_static_field
 use field_manager_mod, only: model_atmos
 use flux_diagnostics, only: FluxDiagnostics
@@ -258,16 +258,22 @@ num_levels = num_layers + 1
 call get_date(time_start, date(1), date(2), date(3), date(4), date(5), date(6))
 if (mpp_pe() .eq. mpp_root_pe()) call print_time(time_start, "Starting simulation at: ")
 call diag_manager_init(time_init=date)
+
+!Initialize axes.
 num_lon = column_blocking%ibe(num_blocks) - column_blocking%ibs(1) + 1
 num_lat = column_blocking%jbe(num_blocks) - column_blocking%jbs(1) + 1
 allocate(olr_integral(num_lon, num_lat))
 allocate(swabs_integral(num_lon, num_lat))
-id_lon = diag_axis_init("lon", atm(1)%longitude, "degrees_east", "X", domain2=atm(1)%domain)
-id_lat = diag_axis_init("lat", atm(1)%latitude, "degrees_north", "Y", domain2=atm(1)%domain)
+id_lon = diag_axis_init("grid_xt", atm(1)%longitude, "degrees_E", "X", domain2=atm(1)%domain)
+id_lat = diag_axis_init("grid_yt", atm(1)%latitude, "degrees_N", "Y", domain2=atm(1)%domain)
 id_phalf = diag_axis_init("phalf", atm(1)%level, "mb", "Z")
 id_pfull = diag_axis_init("pfull", atm(1)%layer, "mb", "Z")
 axes = [id_lon, id_lat, id_pfull, id_phalf]
+
+!Output area static field.
 id_area = register_static_field("dynamics", "area", axes(1:2), "cell area", "m**2")
+call read_area_variable(atm, column_blocking)
+if (id_area > 0) i = send_data(id_area, atm(1)%area, time_start)
 
 !Initialize atmos_cmip_diag
 allocate(ak(num_levels))
