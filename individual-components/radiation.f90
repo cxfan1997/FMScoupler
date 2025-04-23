@@ -29,7 +29,7 @@ use sat_vapor_pres_mod, only: compute_qs, sat_vapor_pres_init
 use solar_constant, only: SolarConstant
 use solar_spectrum, only: SolarSpectrum
 use time_interp_external2_mod, only: time_interp_external_init
-use time_manager_mod, only: get_date, julian, print_time, set_calendar_type, time_manager_init, &
+use time_manager_mod, only: get_date, set_date, julian, noleap, print_time, set_calendar_type, time_manager_init, &
                             time_type, operator(+), operator(-), operator(/=), operator(/), &
                             month_name, get_time, set_time
 use tracer_manager_mod, only: get_number_tracers, get_tracer_index, &
@@ -78,13 +78,13 @@ type(SolarConstant) :: solar_flux_constant
 real :: surface_albedo_weight !Weighting needed to combine "nir" and "vis" albedo values in
                               !in the band that contains the infrared cut-off.
 real(kind=wp), dimension(:, :), allocatable :: swabs_integral
-integer :: t
+integer :: t, yyyy, mm, dd, hh, mi, ss, tick
 integer :: time_stamp_unit
 character(len=9) :: month
 real :: top_level_pressure
 
 !Time variables.
-type(time_type) :: time, time2    !Temporary time variables.
+type(time_type) :: time, time2, forcing_time    !Temporary time variables.
 type(time_type) :: time_step      !Model time step.
 type(time_type) :: time_start     !Start time of the model.
 type(time_type) :: time_end       !End time of the model.
@@ -113,6 +113,7 @@ type(block_control_type) :: column_blocking
 integer :: near_infrared_cutoff = 14600 !Wavenumber [cm-1] that distinguishes the visible from the near-infrared.
 integer :: nxblocks = 1
 integer :: nyblocks = 1
+integer :: forcing_year = -1
 character(len=256) :: solar_constant_path = ""
 character(len=256) :: solar_spectrum_path = ""
 character(len=256) :: profile_path = ""
@@ -120,8 +121,8 @@ character(len=256) :: profile_name = ""
 character(len=256) :: profile_time_type = "end"
 integer :: profile_date(6) = 0
 namelist /standalone_radiation_nml/ near_infrared_cutoff, &
-                                    nxblocks, &
-                                    nyblocks, &
+                                    nxblocks, nyblocks, &
+                                    forcing_year, &
                                     solar_constant_path, &
                                     solar_spectrum_path, &
                                     profile_path, profile_name, &
@@ -177,6 +178,8 @@ call create_atmosphere(atm, column_blocking, nxblocks, nyblocks, profile_path)
 !Set the calendar type.
 if (trim(atm(1)%calendar) .eq. "julian") then
   call set_calendar_type(julian)
+else if (trim(atm(1)%calendar) .eq. "noleap") then
+  call set_calendar_type(noleap)
 else
   call error_mesg("main", "only julian calendar supported.", fatal)
 endif
@@ -414,8 +417,15 @@ do t = 1, atm(1)%num_times
   call read_time_slice(atm, t, column_blocking)
 
   !Time interpolation.
-  call solar_flux_constant%update(time)
-  call radiation_context%update(time)
+  if (forcing_year .ge. 0) then
+    call get_date(time, yyyy, mm, dd, hh, mi, ss, tick)
+    forcing_time = set_date(forcing_year, mm, dd, hh, mi, ss, tick)
+    call radiation_context%update(forcing_time)
+    call solar_flux_constant%update(forcing_time)
+  else
+    call radiation_context%update(time)
+    call solar_flux_constant%update(time)
+  endif
 
 !$omp parallel do private(block_) default(shared)
   do block_ = 1, num_blocks
